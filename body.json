@@ -1,0 +1,5 @@
+{
+  "amount": 4990,
+  "customer": { "name": "Maria", "email": "maria@email.com" },
+  "items": [{ "name": "Camiseta", "quantity": 1, "unit_amount": 4990 }]
+}
