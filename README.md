@@ -168,6 +168,8 @@ Base URL: `http://localhost:4000`
 | GET | `/v1/payments` | Lista pagamentos (filtro opcional por status) |
 | GET | `/v1/payments/:id` | Consulta um pagamento |
 | POST | `/v1/payments/:id/confirm` | Confirma o pagamento com um cartão de teste |
+| POST | `/v1/payments/:id/cancel` | Cancela um pagamento ainda pendente |
+| POST | `/v1/payments/:id/refund` | Reembolsa um pagamento aprovado |
 
 ### Anatomia da URL
 
@@ -339,6 +341,56 @@ curl -i -X POST http://localhost:4000/v1/payments/pay_2d7d51d8515215b4/confirm \
   -d @card.json
 ```
 
+### `POST /v1/payments/:id/cancel`: cancelar pagamento
+
+Cancela um pagamento que ainda esteja em `requires_payment_method`.
+
+- Só é permitido cancelar pagamentos pendentes.
+- Se o pagamento já foi aprovado, recusado ou reembolsado, a API responde `409`.
+- O estado vira `canceled`.
+
+```bash
+curl -i -X POST http://localhost:4000/v1/payments/pay_2d7d51d8515215b4/cancel \
+  -H "Authorization: Bearer sk_test_minha_chave_123"
+```
+
+**Resposta `200 OK`:**
+
+```json
+{
+  "id": "pay_2d7d51d8515215b4",
+  "status": "canceled",
+  "amount": 7500,
+  "currency": "brl",
+  "customer": { "name": "Maria", "email": "maria@email.com" }
+}
+```
+
+### `POST /v1/payments/:id/refund`: reembolsar pagamento
+
+Reembolsa um pagamento que já foi aprovado com sucesso (`succeeded`).
+
+- Funciona somente quando o status atual é `succeeded`.
+- O status é alterado para `refunded`.
+- O campo `refunded_at` registra o momento do reembolso.
+
+```bash
+curl -i -X POST http://localhost:4000/v1/payments/pay_2d7d51d8515215b4/refund \
+  -H "Authorization: Bearer sk_test_minha_chave_123"
+```
+
+**Resposta `200 OK`:**
+
+```json
+{
+  "id": "pay_2d7d51d8515215b4",
+  "status": "refunded",
+  "amount": 7500,
+  "currency": "brl",
+  "refunded_at": "2026-10-17T15:12:05.000Z"
+}
+```
+
 ---
 
 ## Status de um pagamento
@@ -348,11 +400,17 @@ curl -i -X POST http://localhost:4000/v1/payments/pay_2d7d51d8515215b4/confirm \
 | `requires_payment_method` | Criado, aguardando o cartão. | Ao criar o pagamento. |
 | `succeeded` | Aprovado. | Confirmar com cartão aprovado. |
 | `failed` | Recusado ou com erro. | Confirmar com cartão recusado/expirado. |
+| `canceled` | Cancelado antes do processamento. | Chamada a `POST /v1/payments/:id/cancel`. |
+| `refunded` | Reembolsado após aprovação. | Chamada a `POST /v1/payments/:id/refund`. |
 
 ```
 requires_payment_method ──confirm──► succeeded
          │
-         └──confirm──► failed ──confirm (nova tentativa)──► succeeded / failed
+         ├──confirm──► failed ──confirm (nova tentativa)──► succeeded / failed
+         │
+         └──cancel──► canceled
+
+succeeded ──refund──► refunded
 ```
 
 ---
@@ -389,7 +447,7 @@ Todo erro tem o mesmo formato:
 | 400 | `invalid_cvc` | CVC não tem 3 ou 4 dígitos. |
 | 401 | `unauthorized` | API key ausente ou incorreta. |
 | 404 | `not_found` | Pagamento com esse id não existe. |
-| 409 | `invalid_state` | Tentou confirmar um pagamento que já foi pago. |
+| 409 | `invalid_state` | Tentou confirmar, cancelar ou reembolsar um pagamento em estado inválido para a ação. |
 
 Os grupos de status HTTP seguem o padrão: **4xx** é erro de quem chamou a API (dados errados, sem permissão) e **2xx** é sucesso.
 
@@ -528,7 +586,7 @@ Liga o servidor na porta configurada e imprime uma mensagem. Deve ser a **últim
 ## Limitações
 
 - **Dados em memória:** reiniciar o servidor apaga todos os pagamentos.
-- **Sem reembolso ou webhooks** (ainda).
+- **Sem webhooks** (ainda): não existe notificação assinada quando o status muda.
 - **Sem limite de requisições** (rate limit), sem HTTPS e sem logs estruturados.
 - **Chave única:** uma só API key para todos.
 - Feito para **desenvolvimento e testes**. Não é seguro nem completo o suficiente para produção.
@@ -537,7 +595,6 @@ Liga o servidor na porta configurada e imprime uma mensagem. Deve ser a **últim
 
 ## Próximos passos
 
-- [ ] Reembolso total e parcial (`POST /v1/payments/:id/refund`)
 - [ ] Webhooks assinados (HMAC) avisando o site quando um pagamento muda de status
 - [ ] Chave de idempotência (`Idempotency-Key`) para evitar pagamentos duplicados em retries
 - [ ] Persistência em banco de dados (SQLite ou PostgreSQL)

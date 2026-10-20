@@ -153,6 +153,58 @@ app.post('/v1/payments/:id/confirm', async (req, res) => {
   res.json(payment);
 });
 
+app.post('/v1/payments/:id/cancel', (req, res) => {
+  const payment = payments.get(req.params.id);
+
+  if (!payment) {
+    return res.status(404).json({
+      error: { code: 'not_found', message: 'Pagamento não encontrado.' },
+    });
+  };
+
+  if (payment.status !== 'requires_payment_method') {
+    return res.status(409).json({
+      error: { code: 'invalid_state', state: payment.status, message: `Pagamento já está "${payment.status}".`}
+    });
+  }
+
+  payment.status = 'canceled';
+  res.json(payment);
+});
+
+app.post('/v1/payments/:id/refund', (req, res) => {
+  const payment = payments.get(req.params.id);
+
+  if (!payment) {
+    return res.status(404).json({
+      error: { code: 'not_found', message: 'Pagamento não encontrado.' }
+    });
+  }
+
+  if (payment.status !== 'succeeded') {
+    return res.status(409).json({
+      error: { code: 'invalid_state', state: payment.status, message: `Pagamento não está "succeeded".` }
+    });
+  } else {
+    payment.status = 'refunded';
+    payment.refunded_at = new Date().toISOString();
+    res.json(payment);
+  }
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({
+    error: { code: 'internal_error', message: 'Erro interno do servidor.' },
+  });
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    error: { code: 'not_found', message: 'Rota não encontrada.' },
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Rodando em http://localhost:${PORT}`);
 });
